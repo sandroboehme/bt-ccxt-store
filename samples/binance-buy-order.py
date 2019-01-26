@@ -1,9 +1,12 @@
-from ccxtbt import CCXTStore
-from backtrader import Order
-import backtrader as bt
-from datetime import datetime, timedelta
-import time
 import json
+import time
+from datetime import datetime, timedelta
+
+import backtrader as bt
+from backtrader import Order
+
+from ccxtbt import CCXTStore
+
 
 class TestStrategy(bt.Strategy):
 
@@ -20,19 +23,20 @@ class TestStrategy(bt.Strategy):
             self.bought = True
 
         for data in self.datas:
-
             print('{} - {} | O: {} H: {} L: {} C: {} V:{}'.format(data.datetime.datetime(),
-                                                                                   data._name, data.open[0], data.high[0], data.low[0], data.close[0], data.volume[0]))
+                                                                  data._name, data.open[0], data.high[0], data.low[0],
+                                                                  data.close[0], data.volume[0]))
 
     def notify_data(self, data, status, *args, **kwargs):
         dn = data._name
         dt = datetime.now()
-        msg= 'Data Status: {}, Order Status: {}'.format(data._getstatusname(status), status)
-        print(dt,dn,msg)
+        msg = 'Data Status: {}, Order Status: {}'.format(data._getstatusname(status), status)
+        print(dt, dn, msg)
         if data._getstatusname(status) == 'LIVE':
             self.live_data = True
         else:
             self.live_data = False
+
 
 with open('./params.json', 'r') as f:
     params = json.load(f)
@@ -51,8 +55,8 @@ config = {'apiKey': params["binance"]["apikey"],
           'nonce': lambda: str(int(time.time() * 1000)),
           }
 
-store = CCXTStore(exchange='binance', currency='BNB', config=config, retries=5, debug=True)
-
+store = CCXTStore(exchange='binance', currency='BNB', config=config, retries=5, debug=True,
+                  simulate_buy_sell_cancel=True)
 
 # Get the broker and pass any kwargs if needed.
 # ----------------------------------------------
@@ -63,17 +67,17 @@ broker_mapping = {
     'order_types': {
         bt.Order.Market: 'market',
         bt.Order.Limit: 'limit',
-        bt.Order.Stop: 'stop-loss', #stop-loss for kraken, stop for bitmex
+        bt.Order.Stop: 'stop-loss',  # stop-loss for kraken, stop for bitmex
         bt.Order.StopLimit: 'stop limit'
     },
-    'mappings':{
-        'closed_order':{
+    'mappings': {
+        'closed_order': {
             'key': 'status',
-            'value':'closed'
+            'value': 'closed'
         },
-        'canceled_order':{
+        'canceled_order': {
             'key': 'result',
-            'value':1}
+            'value': 1}
     }
 }
 
@@ -85,7 +89,7 @@ cerebro.setbroker(broker)
 hist_start_date = datetime.utcnow() - timedelta(minutes=50)
 data = store.getdata(dataname='BNB/USDT', name="BNBUSDT",
                      timeframe=bt.TimeFrame.Minutes, fromdate=hist_start_date,
-                     compression=1, ohlcv_limit=50, drop_newest=True) #, historical=True)
+                     compression=1, ohlcv_limit=50, drop_newest=True)  # , historical=True)
 
 # Add the feed
 cerebro.adddata(data)

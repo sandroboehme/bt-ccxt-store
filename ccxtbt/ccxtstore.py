@@ -22,18 +22,19 @@ from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
 import time
+from datetime import datetime
 from functools import wraps
 
-import ccxt
-from ccxt.base.errors import NetworkError, ExchangeError
-from datetime import datetime
 import backtrader as bt
+import ccxt
 from backtrader.metabase import MetaParams
-from backtrader.utils.py3 import queue, with_metaclass
-import json
+from backtrader.utils.py3 import with_metaclass
+from ccxt.base.errors import NetworkError, ExchangeError
+
 
 class MetaSingleton(MetaParams):
     '''Metaclass to make a metaclassed class a singleton'''
+
     def __init__(cls, name, bases, dct):
         super(MetaSingleton, cls).__init__(name, bases, dct)
         cls._singleton = None
@@ -94,15 +95,20 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
         '''Returns broker with *args, **kwargs from registered ``BrokerCls``'''
         return cls.BrokerCls(*args, **kwargs)
 
-    def __init__(self, exchange, currency, config, retries, broker_delay=None, debug=False):
+    def __init__(self, exchange, currency, config, retries, broker_delay=0, debug=False,
+                 simulate_buy_sell_cancel=True):
         self.exchange = getattr(ccxt, exchange)(config)
         self.currency = currency
         self.retries = retries
+        self.broker_delay = broker_delay
         self.debug = debug
+        self.simulate_buy_sell_cancel = simulate_buy_sell_cancel
 
         balance = self.exchange.fetch_balance()
         self._cash = balance['free'][currency]
         self._value = balance['total'][currency]
+        self.last_simulated_order = None
+        self.last_simulated_oid = 0
 
     def get_granularity(self, timeframe, compression):
         if not self.exchange.has['fetchOHLCV']:
@@ -136,6 +142,37 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
 
         return retry_method
 
+    def get_mock_order(self, exchange, symbol, order_type, side, amount, price, params):
+        mock_orders = {
+            'BINANCE': {
+                'SELL': {
+                    'LIMIT': {
+                        'symbol': symbol.upper(),
+                        'quantity': f'{amount}',
+                        'type': order_type.upper(),
+                        'side': side.upper(),
+                        'newOrderRespType': 'RESULT',
+                        'price': f'{price}',
+                    }
+                },
+                'BUY': {
+                    'LIMIT': {
+                        'symbol': symbol.upper(),
+                        'quantity': f'{amount}',
+                        'type': order_type.upper(),
+                        'side': side.upper(),
+                        'newOrderRespType': 'RESULT',
+                        'price': f'{price}',
+                    }
+                }
+            }
+        }
+        mock_order = mock_orders[exchange.id.upper()][side.upper()][order_type.upper()]
+
+        # return self.simulated_order[oid]
+        self.last_simulated_oid += 1
+        # add to mock_orders
+        return mock_order
 
     @retry
     def get_wallet_balance(self, currency, params=None):
@@ -151,13 +188,19 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
     @retry
     def getposition(self):
         return self._value
-        #return self.getvalue(currency)
+        # return self.getvalue(currency)
 
     @retry
     def create_order(self, symbol, order_type, side, amount, price, params):
-        # returns the order
-        return self.exchange.create_order(symbol=symbol, type=order_type, side=side,
-                                          amount=amount, price=price, params=params)
+        if self.simulate_buy_sell_cancel:
+            time.sleep(self.broker_delay)
+            order = self.get_mock_order(self.exchange, symbol, order_type, side, amount, price, params)
+            self.last_simulated_order = order
+        else:
+            # returns the order
+            order = self.exchange.create_order(symbol=symbol, type=order_type, side=side,
+                                               amount=amount, price=price, params=params)
+        return order
 
     @retry
     def cancel_order(self, order_id):
@@ -170,12 +213,15 @@ class CCXTStore(with_metaclass(MetaSingleton, object)):
     @retry
     def fetch_ohlcv(self, symbol, timeframe, since, limit, params={}):
         if self.debug:
-            print('Fetching: {}, TF: {}, Since: {}, Limit: {}'.format(symbol,timeframe,since,limit))
+            print('Fetching: {}, TF: {}, Since: {}, Limit: {}'.format(symbol, timeframe, since, limit))
         return self.exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit, params=params)
 
     @retry
     def fetch_order(self, oid, symbol):
-        return self.exchange.fetch_order(oid, symbol)
+        if self.simulate_buy_sell_cancel:
+            return self.simulated_order[oid]
+        else:
+            return self.exchange.fetch_order(oid, symbol)
 
     @retry
     def fetch_open_orders(self):
