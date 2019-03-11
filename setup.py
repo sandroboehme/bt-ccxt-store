@@ -8,7 +8,7 @@ setup(
     author='Dave Vallance',
     author_email='dave@backtest-rookies.com',
     license='MIT',
-    packages=[find_packages()],
+    packages=find_packages(),
     install_requires=['backtrader', 'ccxt'],
     package_data={
         # If any package contains *.json files, include them:
